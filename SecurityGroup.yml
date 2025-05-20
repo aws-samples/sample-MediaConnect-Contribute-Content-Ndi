@@ -1,0 +1,139 @@
+AWSTemplateFormatVersion: 2010-09-09
+
+Description: This template deploys a AWS security group that allows Remote Desktop access, NDI discovery
+             and NDI flow traffic.
+             The PrefixName parameter is prefixed to the resource names that are created, as
+             shown below.
+              * Security groups named as shown below.
+                <PrefixName>PublicIngressSecurityGroup
+                <PrefixName>NdiTrafficSecurityGroup
+                <PrefixName>NdiDiscoverySecurityGroup
+                <PrefixName>RdpSecurityGroup
+
+Parameters:
+  PrefixName:
+    Type: String
+    Description: A name that is prefixed to resource names.
+
+  RdpTrustedIpRange:
+    Type: String
+    Description: CIDR block for trusted IP range to access EC2 instance using RDP.
+
+  DiscoveryTrustedIpRange:
+    Type: String
+    Description: CIDR block for trusted IP range for Discovery server traffic.
+
+  SrtTrustedIpRange:
+    Type: String
+    Description: CIDR block for trusted IP range for SRT traffic to MediaConnect.
+
+  SrtTrafficPort:
+    Type: String
+    Description: The port to use for SRT traffic to MediaConnect (ie. 5000).
+
+  VPCId:
+    Type: AWS::EC2::VPC::Id
+    Description: The ID of the existing VPC to use.
+
+Resources:
+
+  PublicIngressSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow ingress access from public internet.
+      GroupName: !Sub "${PrefixName}PublicIngressSecurityGroup"
+      VpcId: !Ref VPCId
+      SecurityGroupIngress:
+        - IpProtocol: udp
+          FromPort: !Ref SrtTrafficPort
+          ToPort: !Ref SrtTrafficPort
+          CidrIp: !Ref SrtTrustedIpRange
+          Description: Allow SRT traffic to MediaConnect.
+
+  PublicEgressSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow access to public internet.
+      GroupName: !Sub "${PrefixName}PublicEgressSecurityGroup"
+      VpcId: !Ref VPCId
+      SecurityGroupEgress:
+        - Description: Allow all outbound traffic.
+          FromPort: 0
+          ToPort: 0
+          IpProtocol: "-1"
+          CidrIp: 0.0.0.0/0
+
+  NdiTrafficSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: NDI flow traffic.
+      GroupName: !Sub "${PrefixName}NdiTrafficSecurityGroup"
+      VpcId: !Ref VPCId
+
+  NdiSelfReferenceIngressRule:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref NdiTrafficSecurityGroup
+      # Allow TCP NDI flow traffic.
+      IpProtocol: tcp
+      FromPort: 5961
+      ToPort: 65535
+      SourceSecurityGroupId:
+        Fn::GetAtt:
+        - NdiTrafficSecurityGroup
+        - GroupId
+
+  NdiDiscoverySecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow NDI Discovery server traffic.
+      GroupName: !Sub "${PrefixName}NdiDiscoverySecurityGroup"
+      VpcId: !Ref VPCId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 5959
+          ToPort: 5960
+          CidrIp: !Ref DiscoveryTrustedIpRange
+          Description: Allow incoming TCP NDI Discovery server traffic.
+      SecurityGroupEgress:
+        - IpProtocol: tcp
+          FromPort: 5959
+          ToPort: 5960
+          CidrIp: !Ref DiscoveryTrustedIpRange
+          Description: Allow outgoing TCP NDI Discovery server traffic.
+
+  RdpSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow RDP access to NDI Tools instance.
+      GroupName: !Sub "${PrefixName}RdpSecurityGroup"
+      VpcId: !Ref VPCId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 3389
+          ToPort: 3389
+          CidrIp: !Ref RdpTrustedIpRange
+          Description: Allow RDP to EC2 Instance.
+      SecurityGroupEgress:
+        - Description: No outbound traffic.
+          FromPort: 0
+          ToPort: 0
+          IpProtocol: "-1"
+          CidrIp: 0.0.0.0/0
+
+Outputs:
+  PublicIngressSecurityGroupId:
+    Description: A reference to the created public ingress security group.
+    Value: !GetAtt PublicIngressSecurityGroup.GroupId
+
+  NdiTrafficSecurityGroupId:
+    Description: A reference to the created NDI traffic security group.
+    Value: !GetAtt NdiTrafficSecurityGroup.GroupId
+
+  NdiDiscoverySecurityGroupId:
+    Description: A reference to the created NDI Discovery security group.
+    Value: !GetAtt  NdiDiscoverySecurityGroup.GroupId
+
+  RdpSecurityGroupId:
+    Description: A reference to the created RDP security group.
+    Value: !GetAtt RdpSecurityGroup.GroupId

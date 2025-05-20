@@ -1,0 +1,86 @@
+AWSTemplateFormatVersion: 2010-09-09
+
+Description: This template deploys a AWS MediaConnect flow using a SRT source and a NDI output.
+             The PrefixName parameter is prefixed to the resource names that are created, as
+             shown below.
+              * MediaConnect Flow name <PrefixName>Flow
+              * VPC Interface name <PrefixName>VpcInterface
+
+            **WARNING** This template creates MediaConnect Flow and related resources. You will be billed
+            for the AWS resources used if you create a stack from this template.
+
+Parameters:
+  PrefixName:
+    Type: String
+    Description: A name that is prefixed to resource names.
+
+  SubnetId:
+    Type: AWS::EC2::Subnet::Id
+    Description: ID of the subnet to use.
+
+  IAMRoleArn:
+    Type: String
+    Description: ARN of the IAM Role to use.
+
+  SecurityGroupIds:
+    Type: CommaDelimitedList # Required when using a nested stack to pass a list as a String.
+    Description: List of security group IDs to use.
+
+  SrtTrafficPort:
+    Type: String
+    Description: The port to use for SRT traffic to MediaConnect (ie. 5000).
+
+  SrtTrustedIpRange:
+    Type: String
+    Description: CIDR block for trusted SRT traffic to MediaConnect.
+
+  DiscoveryServerIp:
+    Type: String
+    Description: The IP address of the NDI Discovery Server.
+
+Resources:
+  Flow:
+    Type: AWS::MediaConnect::Flow
+    Properties:
+      Name: !Sub "${PrefixName}Flow"
+      Source:
+        Name: SrtSource
+        Protocol: srt-listener
+        IngestPort: !Ref SrtTrafficPort
+        Description: SRT-Listener MediaConnect source.
+        WhitelistCidr: !Ref SrtTrustedIpRange
+      SourceMonitoringConfig:
+        ThumbnailState: ENABLED
+      FlowSize: LARGE
+      NdiConfig:
+        NdiState: ENABLED
+        NdiDiscoveryServers:
+          - DiscoveryServerAddress: !Ref DiscoveryServerIp
+            VpcInterfaceAdapter: !Sub "${PrefixName}VpcInterface"
+      VpcInterfaces:
+        - Name: !Sub "${PrefixName}VpcInterface"
+          RoleArn: !Ref IAMRoleArn
+          SubnetId: !Ref SubnetId
+          SecurityGroupIds: !Ref SecurityGroupIds
+
+  NdiOutput:
+    Type: AWS::MediaConnect::FlowOutput
+    Properties:
+      FlowArn: !Ref Flow
+      Name: NdiOutput
+      NdiProgramName: !Sub "${PrefixName}Program"
+      Protocol: ndi-speed-hq
+
+Outputs:
+  SourceIngestIp:
+    Description: The IP address that the flow listens on for incoming content.
+    Value: !GetAtt Flow.Source.IngestIp
+  FlowNdiMachineName:
+    Description: The NDI machine name used in the flow.
+    Value: !GetAtt Flow.FlowNdiMachineName
+  OutputNdiProgramName:
+    Description: The NDI program name used for the output.
+    Value: !Sub "${PrefixName}Program" # Match value used for NdiOutput.NdiProgramName.
+  FlowArn:
+    Description: The ARN of the created MediaConnect flow.
+    Value: !GetAtt Flow.FlowArn

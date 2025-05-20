@@ -1,0 +1,89 @@
+AWSTemplateFormatVersion: 2010-09-09
+
+Description: This template deploys a AWS Virtual Private Cloud (VPC) with a public subnet, an
+             Internet Gateway with a default route on the public subnet, a default public route
+             and a public subnet route table association.
+             The PrefixName parameter is prefixed to the resource names that are created, as
+             shown below.
+              * VPC named <PrefixName>VPC
+              * Internet Gateway named <PrefixName>InternetGateway
+              * Public subnet named <PrefixName>SubnetPublic
+              * Public route table named <PrefixName>PublicRoutes
+
+            **WARNING** This template creates VPC, Internet Gateway and related resources. You will be billed
+            for the AWS resources used if you create a stack from this template.
+
+Parameters:
+  PrefixName:
+    Type: String
+    Description: A name that is prefixed to resource names.
+
+Resources:
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.0.0.0/24 # Using /24 allows 256 IPv4 addresses.
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: !Sub "${PrefixName}VPC"
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: !Sub "${PrefixName}InternetGateway"
+
+  InternetGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      InternetGatewayId: !Ref InternetGateway
+      VpcId: !Ref VPC
+
+  PublicSubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      AvailabilityZone: !Select [ 0, !GetAZs '' ] # Select default zone from credentials.
+      CidrBlock: 10.0.0.0/28
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: !Sub "${PrefixName}SubnetPublic"
+
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub "${PrefixName}PublicRoutes"
+
+  DefaultPublicRoute:
+    Type: AWS::EC2::Route
+    DependsOn: InternetGatewayAttachment
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+
+  PublicSubnetRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      SubnetId: !Ref PublicSubnet
+
+Outputs:
+  VPC:
+    Description: A reference to the created VPC.
+    Value: !Ref VPC
+
+  CidrBlock:
+    Description: The primary IPv4 CIDR block for the VPC.
+    Value: !GetAtt VPC.CidrBlock
+
+  PublicSubnet:
+    Description: A reference to the created public subnet.
+    Value: !Ref PublicSubnet

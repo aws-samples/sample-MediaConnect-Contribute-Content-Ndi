@@ -1,0 +1,160 @@
+AWSTemplateFormatVersion: 2010-09-09
+
+Description: This root stack template uses several nested templates to deploy a VPC that contains
+             a Windows EC2 instance, a MediaConnect flow and all permissions and resources required
+             to access the EC2 instance and the flow from the internet.
+             The nested stack template files used are shown below.
+              * IAM.yml
+              * SecurityGroup.yml
+              * VPC.yml
+              * WindowsInstance.yml
+              * MediaConnectFlow.yml
+
+            This file cannot be directly uploaded to S3, since TemplateURL values must be converted to
+            S3 URLs. This is normally done using the AWS CLI cloudformation package command.
+
+            **WARNING** This template creates several AWS resources as noted above. You will be billed
+            for the AWS resources used if you create a stack from this template.
+
+Parameters:
+  PrefixName:
+    Type: String
+    AllowedPattern: '[a-zA-Z0-9_+=,.@\-]*' # Allowed characters.
+    MaxLength: 40 # Ensures this prefix + resource name doesn't exceed 64 characters.
+    Description: A name that is prefixed to resource names.
+
+  RdpTrustedIpRange:
+    Type: String
+    AllowedPattern: '([0-9]{1,3}.){3}[0-9]{1,3}($|\/(16|24|32))'
+    Description: CIDR block for trusted IP range for RDP to EC2 instance (ie. xxx.xxx.xxx.0/24).
+
+  SrtTrustedIpRange:
+    Type: String
+    AllowedPattern: '([0-9]{1,3}.){3}[0-9]{1,3}($|\/(16|24|32))'
+    Description: CIDR block for trusted IP range for SRT traffic to MediaConnect (ie. xxx.xxx.xxx.0/24).
+
+  SrtTrafficPort:
+    Type: Number
+    MinValue: 1
+    MaxValue: 65535
+    Description: The port to use for SRT traffic to MediaConnect (ie. 5000).
+
+Resources:
+  IAMNestedStack:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: ./IAM.yml
+      Parameters:
+        PrefixName: !Ref PrefixName
+
+  SecurityGroupNestedStack:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: ./SecurityGroup.yml
+      Parameters:
+        PrefixName: !Ref PrefixName
+        RdpTrustedIpRange: !Ref RdpTrustedIpRange
+        DiscoveryTrustedIpRange:
+          Fn::GetAtt:
+            - VpcNestedStack
+            - Outputs.CidrBlock # Use the VPC CIDR for Discovery Server trusted traffic.
+        SrtTrustedIpRange: !Ref SrtTrustedIpRange
+        SrtTrafficPort: !Ref SrtTrafficPort
+        VPCId:
+          Fn::GetAtt:
+            - VpcNestedStack
+            - Outputs.VPC
+
+  VpcNestedStack:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: ./VPC.yml
+      Parameters:
+        PrefixName: !Ref PrefixName
+
+  WindowsInstanceNestedStack:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: ./WindowsInstance.yml
+      Parameters:
+        PrefixName: !Ref PrefixName
+        VPCId:
+          Fn::GetAtt:
+            - VpcNestedStack
+            - Outputs.VPC
+        SubnetId:
+          Fn::GetAtt:
+            - VpcNestedStack
+            - Outputs.PublicSubnet
+        SecurityGroupIds: !Join # Must pass as a String, so use Join.
+          - ','
+          -
+            - Fn::GetAtt:
+              - SecurityGroupNestedStack
+              - Outputs.RdpSecurityGroupId
+            - Fn::GetAtt:
+              - SecurityGroupNestedStack
+              - Outputs.NdiDiscoverySecurityGroupId
+            - Fn::GetAtt:
+              - SecurityGroupNestedStack
+              - Outputs.NdiTrafficSecurityGroupId
+        IAMInstanceRoleName:
+          Fn::GetAtt:
+            - IAMNestedStack
+            - Outputs.S3ReadOnlyIAMRole
+
+  MediaConnectNestedStack:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: ./MediaConnectFlow.yml
+      Parameters:
+        PrefixName: !Ref PrefixName
+        SubnetId:
+          Fn::GetAtt:
+            - VpcNestedStack
+            - Outputs.PublicSubnet
+        IAMRoleArn:
+          Fn::GetAtt:
+            - IAMNestedStack
+            - Outputs.MediaConnectIAMRoleArn
+        SecurityGroupIds: !Join # Must pass as a String, so use Join.
+          - ','
+          -
+            - Fn::GetAtt:
+              - SecurityGroupNestedStack
+              - Outputs.PublicIngressSecurityGroupId
+            - Fn::GetAtt:
+              - SecurityGroupNestedStack
+              - Outputs.NdiTrafficSecurityGroupId
+        SrtTrafficPort: !Ref SrtTrafficPort
+        SrtTrustedIpRange: !Ref SrtTrustedIpRange
+        DiscoveryServerIp:
+          Fn::GetAtt:
+            - WindowsInstanceNestedStack
+            - Outputs.PrivateIp
+
+Outputs:
+  SourceIngestIp:
+    Description: The IP address that the flow listens on.
+    Value:
+      Fn::GetAtt:
+        - MediaConnectNestedStack
+        - Outputs.SourceIngestIp
+  NdiMachineName:
+    Description: The NDI machine name used for the flow.
+    Value:
+      Fn::GetAtt:
+        - MediaConnectNestedStack
+        - Outputs.FlowNdiMachineName
+  NdiProgramName:
+    Description: The NDI program name used for the output.
+    Value:
+      Fn::GetAtt:
+        - MediaConnectNestedStack
+        - Outputs.OutputNdiProgramName
+  FlowArn:
+    Description: The ARN of the MediaConnect flow.
+    Value:
+      Fn::GetAtt:
+        - MediaConnectNestedStack
+        - Outputs.FlowArn

@@ -1,0 +1,86 @@
+AWSTemplateFormatVersion: 2010-09-09
+
+Description: This template deploys AWS Identity and Access Management (IAM) roles and policies.
+             The PrefixName parameter is prefixed to the resource names that are created, as
+             shown below.
+              * S3 read-only IAM role named <PrefixName>ReadOnlyIAMRole. Applied to the Windows EC2
+                instance so it can download the NVIDIA device driver from S3.
+              * MediaConnect IAM role named <PrefixName>MediaConnectIAMRole. Applied to the
+                MediaConnect flow allowing access to the MediaConnect service from the customer's VPC.
+              * MediaConnect IAM policy named <PrefixName>MediaConnectPolicy. Contains the 
+                MediaConnect IAM role.
+Parameters:
+  PrefixName:
+    Type: String
+    Description: A name that is prefixed to resource names.
+
+Resources:
+  S3ReadOnlyIAMRole:
+    Type: AWS::IAM::Role
+    Properties:
+       RoleName: !Sub "${PrefixName}ReadOnlyIAMRole"
+       AssumeRolePolicyDocument:
+         Version: 2012-10-17
+         Statement:
+           - Effect: Allow
+             Principal:
+               Service:
+                 - ec2.amazonaws.com
+             Action:
+               - sts:AssumeRole
+       Policies:
+        - PolicyName: !Sub "${PrefixName}S3ReadOnlyPolicy"
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:ListBucket
+                Resource: arn:aws:s3:::*
+
+  MediaConnectIAMRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${PrefixName}MediaConnectIAMRole"
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - mediaconnect.amazonaws.com
+            Action:
+              - sts:AssumeRole
+
+  RolePolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: !Sub "${PrefixName}MediaConnectPolicy"
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action:
+              - mediaconnect:* # Allow use of all MediaConnect APIs.
+              - cloudwatch:GetMetricData
+              - ec2:DescribeAvailabilityZones
+              - ec2:DescribeNetworkInterfaces
+              - ec2:DescribeSecurityGroups
+              - ec2:DescribeSubnets
+              - ec2:CreateNetworkInterface
+              - ec2:CreateNetworkInterfacePermission
+              - ec2:DeleteNetworkInterface
+              - ec2:DeleteNetworkInterfacePermission
+            Resource: "*"
+      Roles:
+        - !Ref MediaConnectIAMRole
+
+Outputs:
+  MediaConnectIAMRoleArn:
+    Description: The ARN of the created MediaConnect IAM Role.
+    Value: !GetAtt MediaConnectIAMRole.Arn
+
+  S3ReadOnlyIAMRole:
+    Description: A reference to the created S3 read-only IAM Role.
+    Value: !Ref S3ReadOnlyIAMRole
